@@ -1,0 +1,236 @@
+//#include <iostream>
+//#include <cmath>
+//#include <Windows.h>
+//
+//#define MAX_LOGS 1000
+//#define MAX_TEXT 128
+//
+//using namespace std;
+//
+//const string arrayText[3] = {"Сообщение 1","Мессендж 2","Оповещение 3"};
+//
+//struct LogRecord {
+//    DWORD threadId;
+//    int priority;
+//    DWORD tick;
+//
+//    char message[MAX_TEXT];
+//};
+//
+//struct LogBuffer {
+//    LogRecord records[MAX_LOGS];
+//    LONG index;
+//};
+//
+//DWORD WINAPI Logger(LPVOID) {
+//    string message = arrayText[rand() % 3];
+//    LogRecord lr;
+//    LogBuffer lb;
+//
+//    HANDLE thread = GetCurrentThread();
+//
+//    lr.threadId = GetThreadId(thread);
+//    lr.priority = GetThreadPriority(thread);
+//
+//    lb.records[lb.index] = lr;
+//    lb.index++;
+//
+//    Sleep(rand() % 100);
+//}
+//
+//DWORD WINAPI Checker(LPVOID) {
+//    Sleep(100);
+//
+//    LogBuffer lb;
+//    LogRecord lr;
+//
+//
+//
+//
+//    for (int i = lb.index; i > 0; --i) {
+//        lr = lb.records[i];
+//
+//        cout << "" << endl;
+//        cout << "Номер потока - " << lr.threadId << endl;
+//        cout << "Приоритет потока - " << lr.priority << endl;
+//        cout << "Кол-во тиков - " << lr.tick << endl;
+//        cout << "Сообщение потока - " << lr.message << endl;
+//    }
+//}
+//
+//int main()
+//{
+//    HANDLE Thread[4];
+//    DWORD idThread[4];
+//
+//    Thread[0] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[0]);
+//    if (Thread[0] == NULL) {
+//        cout << "Ошибка запуска потока - " << GetLastError() << endl;
+//        return 0;
+//    }
+//    Thread[1] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[1]);
+//    if (Thread[1] == NULL) {
+//        cout << "Ошибка запуска потока - " << GetLastError() << endl;
+//        return 0;
+//    }
+//    Thread[2] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[2]);
+//    if (Thread[2] == NULL) {
+//        cout << "Ошибка запуска потока - " << GetLastError() << endl;
+//        return 0;
+//    }
+//    Thread[3] = CreateThread(NULL, 0, Checker, NULL, 0, &idThread[3]);
+//    if (Thread[3] == NULL) {
+//        cout << "Ошибка запуска потока - " << GetLastError() << endl;
+//        return 0;
+//    }
+//
+//    SetThreadPriority(Thread[0], THREAD_PRIORITY_HIGHEST);
+//    SetThreadPriority(Thread[1], THREAD_PRIORITY_NORMAL);
+//    SetThreadPriority(Thread[2], THREAD_PRIORITY_BELOW_NORMAL);
+//    SetThreadPriority(Thread[3], THREAD_PRIORITY_LOWEST);
+//}
+
+
+#define _CRT_SECURE_NO_WARNINGS // Чтобы не ругался на strcpy
+#include <iostream>
+#include <windows.h>
+#include <string>
+#include <ctime>
+
+#define MAX_LOGS 1000
+#define MAX_TEXT 128
+
+using namespace std;
+
+
+
+// Структура одной записи
+struct LogRecord {
+    DWORD threadId;
+    int priority;
+    DWORD tick;
+    char message[MAX_TEXT];
+};
+
+// Структура всего журнала (общий ресурс)
+struct LogBuffer {
+    LogRecord records[MAX_LOGS];
+    LONG index = 0; // Начинаем с 0
+};
+
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+LogBuffer globalBuffer;          // Общий буфер для всех потоков
+CRITICAL_SECTION criticalSection; // Объект синхронизации
+bool isRunning = true;            // Флаг для работы циклов
+
+// Тексты для случайного выбора
+const string arrayText[3] = { "Сообщение: Ошибка", "Сообщение: Предупреждение", "Сообщение: Информация" };
+
+// Функция потока-логгера (писателя)
+DWORD WINAPI Logger(LPVOID lpParam) {
+    srand(GetCurrentThreadId()); // Инициализация рандома для каждого потока
+
+    while (isRunning) {
+        // Подготовка данных (делаем ДО критической секции)
+        string text = arrayText[rand() % 3];
+        HANDLE thread = GetCurrentThread();
+
+        // ВХОД В КРИТИЧЕСКУЮ СЕКЦИЮ (Блокируем доступ другим)
+        EnterCriticalSection(&criticalSection);
+
+        if (globalBuffer.index < MAX_LOGS) {
+            int id = globalBuffer.index;
+
+            globalBuffer.records[id].threadId = GetCurrentThreadId();
+            globalBuffer.records[id].priority = GetThreadPriority(thread);
+            globalBuffer.records[id].tick = GetTickCount();
+
+            // Копируем текст в массив char
+            strcpy(globalBuffer.records[id].message, text.c_str());
+
+            globalBuffer.index++; // Сдвигаем индекс
+        }
+
+        // ВЫХОД ИЗ КРИТИЧЕСКОЙ СЕКЦИИ (Разрешаем доступ другим)
+        LeaveCriticalSection(&criticalSection);
+
+        // Спим 10-100 мс (псевдослучайно)
+        Sleep(10 + rand() % 91);
+    }
+    return 0;
+}
+
+// Функция потока-наблюдателя (читателя)
+DWORD WINAPI Checker(LPVOID lpParam) {
+    while (isRunning) {
+        Sleep(100); // Проверяем раз в 100 мс
+
+        // ВХОД В КРИТИЧЕСКУЮ СЕКЦИЮ
+        EnterCriticalSection(&criticalSection);
+
+        system("cls"); // Очистка консоли (для наглядности)
+        cout << "=== ЖУРНАЛ СОБЫТИЙ (Последние 5) ===" << endl;
+        cout << "Всего записей: " << globalBuffer.index << endl << endl;
+
+        int current = globalBuffer.index;
+        int start = current - 5;
+        if (start < 0) start = 0; // Чтобы не уйти в минус
+
+        for (int i = start; i < current; i++) {
+            LogRecord lr = globalBuffer.records[i];
+            cout << "[" << lr.tick << " ms] ";
+            cout << "ID: " << lr.threadId << " | ";
+            cout << "PRIO: " << lr.priority << " | ";
+            cout << lr.message << endl;
+        }
+
+        // ВЫХОД ИЗ КРИТИЧЕСКОЙ СЕКЦИИ
+        LeaveCriticalSection(&criticalSection);
+    }
+    return 0;
+}
+
+int main()
+{
+    setlocale(LC_ALL, "Russian");
+
+    // 1. Инициализация критической секции
+    InitializeCriticalSection(&criticalSection);
+
+    HANDLE hThreads[4];
+    DWORD idThread[4];
+
+    // 2. Создание потоков
+    // T1 - Высокий приоритет
+    hThreads[0] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[0]);
+    SetThreadPriority(hThreads[0], THREAD_PRIORITY_HIGHEST);
+
+    // T2 - Нормальный приоритет
+    hThreads[1] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[1]);
+    SetThreadPriority(hThreads[1], THREAD_PRIORITY_NORMAL);
+
+    // T3 - Пониженный приоритет
+    hThreads[2] = CreateThread(NULL, 0, Logger, NULL, 0, &idThread[2]);
+    SetThreadPriority(hThreads[2], THREAD_PRIORITY_BELOW_NORMAL);
+
+    // T4 - Наблюдатель (самый низкий)
+    hThreads[3] = CreateThread(NULL, 0, Checker, NULL, 0, &idThread[3]);
+    SetThreadPriority(hThreads[3], THREAD_PRIORITY_LOWEST);
+
+    // 3. Работа программы
+    cout << "Программа работает 5 секунд..." << endl;
+    Sleep(5000); // Даем потокам поработать 5 секунд
+
+    // 4. Завершение
+    isRunning = false; // Сообщаем потокам, что пора выходить
+    WaitForMultipleObjects(4, hThreads, TRUE, INFINITE); // Ждем пока все закончат
+
+    // Удаляем критическую секцию
+    DeleteCriticalSection(&criticalSection);
+
+    // Закрываем дескрипторы
+    for (int i = 0; i < 4; i++) CloseHandle(hThreads[i]);
+
+    cout << "Работа завершена." << endl;
+    return 0;
+}
