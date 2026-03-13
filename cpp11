@@ -571,7 +571,7 @@ int main() {
 
     bot.PlaceShipsRandom();
 
-    // ЗАПУСК ИГРЫ В Win32 ПОТОКАХ
+    // ЗАПУСК ИГРЫ
 
     hPlayerTurn = CreateEventA(NULL, FALSE, TRUE, NULL);  // Игрок ходит первым (TRUE)
     hBotTurn = CreateEventA(NULL, FALSE, FALSE, NULL);    // Бот ждет (FALSE)
